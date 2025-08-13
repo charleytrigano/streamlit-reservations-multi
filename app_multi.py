@@ -311,7 +311,7 @@ def sms_message_arrivee(row: pd.Series) -> str:
     tel_aff = str(row.get("telephone") or "").strip()
 
     return (
-        "VILLA TOBIAS\n"
+        "LE TURENNE\n"
         f"Plateforme : {plateforme}\n"
         f"Date d'arrivee : {d1s}  Date depart : {d2s}  Nombre de nuitees : {nuitees}\n\n"
         f"Bonjour {nom}\n"
@@ -321,7 +321,7 @@ def sms_message_arrivee(row: pd.Series) -> str:
         "a quelle heure vous pensez arriver.\n\n "
         "Sachez egalement qu'une place de parking est a votre disposition dans l'immeuble, en cas de besoin.\n\n "
         "Nous vous souhaitons un excellent voyage et nous nous rejouissons de vous rencontrer.\n\n "
-        "Annick & Charley"
+        "Guy"
     )
 
 def sms_message_depart(row: pd.Series) -> str:
@@ -333,7 +333,7 @@ def sms_message_depart(row: pd.Series) -> str:
         "Si l’envie vous prend de revenir explorer encore un peu notre ville (ou simplement retrouver le confort de notre petit cocon), "
         "sachez que notre porte vous sera toujours grande ouverte.\n\n"
         "Au plaisir de vous accueillir à nouveau,\n"
-        "Annick & Charley"
+        "Guy"
     )
 
 # ==============================  UI : TOTAUX  ==============================
