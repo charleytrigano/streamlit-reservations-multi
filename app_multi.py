@@ -1,12 +1,10 @@
 # app_multi.py — Villa Tobias (multi-appartements)
-# Fonctions clés :
-# - Gestion multi-appartements (filtre, saisie, modification)
-# - Palette plateformes/couleurs (ajout/suppression dans sidebar)
-# - Calendrier mensuel coloré par plateforme
-# - Rapport par année/mois/plateforme (graphes matplotlib)
-# - Export ICS (Google Agenda import manuel)
-# - SMS manuel (arrivées demain, relance +24h départ, composeur)
-# - Excel I/O (openpyxl), téléphone conservé en texte (+, pas de .0)
+# Corrections :
+# - Plateformes dynamiques partout (plus de liste figée)
+# - Gestion palette plateformes/couleurs (ajout/suppression) fiable
+# - Calendrier/graphes utilisent les couleurs de la palette
+# - Téléphone en texte (+33 conservé, pas de .0)
+# - SMS manuel, Export ICS, etc. (inchangés)
 
 import streamlit as st
 import pandas as pd
@@ -149,8 +147,8 @@ def load_platform_palette() -> pd.DataFrame:
         return df
     try:
         df = pd.read_excel(PLATFORM_FILE)
-        df["plateforme"] = df["plateforme"].astype(str).strip()
-        df["color"] = df["color"].astype(str).strip()
+        df["plateforme"] = df["plateforme"].astype(str).str.strip()
+        df["color"] = df["color"].astype(str).str.strip()
         df = df.dropna(subset=["plateforme","color"]).drop_duplicates(subset=["plateforme"], keep="last")
         return df
     except Exception:
@@ -180,6 +178,15 @@ def build_platform_cmap(df_palette: pd.DataFrame):
         return col
     return get_color
 
+def platform_options(df_resa: pd.DataFrame, df_palette: pd.DataFrame):
+    """Liste dynamique : plateformes présentes dans les données ∪ palette."""
+    from_data = sorted(df_resa["plateforme"].dropna().astype(str).str.strip().unique().tolist()) if "plateforme" in df_resa.columns else []
+    from_palette = sorted(df_palette["plateforme"].dropna().astype(str).str.strip().unique().tolist())
+    merged = sorted({*from_data, *from_palette})
+    if not merged:
+        merged = ["Autre"]
+    return merged
+
 def sidebar_platform_manager():
     st.sidebar.markdown("---")
     st.sidebar.subheader("🎨 Plateformes & couleurs")
@@ -208,19 +215,19 @@ def sidebar_platform_manager():
 
     # Ajout
     st.sidebar.markdown("**Ajouter une plateforme**")
-    new_pf = st.sidebar.text_input("Nom de la plateforme", key="pf_add_name", label_visibility="collapsed", placeholder="Ex: Abritel")
-    new_color = st.sidebar.color_picker("Couleur", "#bcbd22", key="pf_add_color", label_visibility="collapsed")
+    new_pf = st.sidebar.text_input("Nom de la plateforme", key="pf_add_name", placeholder="Ex: Abritel")
+    new_color = st.sidebar.color_picker("Couleur", "#bcbd22", key="pf_add_color")
     if st.sidebar.button("➕ Ajouter"):
-        new_pf = (new_pf or "").strip()
-        if not new_pf:
+        pf_clean = (new_pf or "").strip()
+        if not pf_clean:
             st.sidebar.warning("Indique un nom de plateforme.")
         else:
-            if (df_pal["plateforme"].str.lower() == new_pf.lower()).any():
+            if (df_pal["plateforme"].str.lower() == pf_clean.lower()).any():
                 st.sidebar.info("Cette plateforme existe déjà.")
             else:
-                df_new = pd.concat([df_pal, pd.DataFrame([{"plateforme": new_pf, "color": new_color}])], ignore_index=True)
+                df_new = pd.concat([df_pal, pd.DataFrame([{"plateforme": pf_clean, "color": new_color}])], ignore_index=True)
                 save_platform_palette(df_new)
-                st.sidebar.success("Plateforme ajoutée.")
+                st.sidebar.success(f"Plateforme « {pf_clean} » ajoutée.")
                 st.rerun()
 
 # ==============================  EXCEL I/O  ================================
@@ -415,12 +422,16 @@ def vue_reservations(df: pd.DataFrame):
         st.info("Aucune donnée.")
         return
 
+    df_pal = load_platform_palette()
+
     # Filtres haut : Appartement, Plateforme, Année, Mois
     c1, c2, c3, c4 = st.columns(4)
     apps = ["Tous"] + sorted(df["appartement"].dropna().astype(str).unique().tolist())
     app = c1.selectbox("Appartement", apps, index=0)
-    plats = ["Toutes"] + sorted(df["plateforme"].dropna().unique().tolist())
-    pf = c2.selectbox("Plateforme", plats, index=0)
+
+    plats_dyn = platform_options(df, df_pal)
+    pf = c2.selectbox("Plateforme", ["Toutes"] + plats_dyn, index=0)
+
     annees = ["Toutes"] + sorted(df["AAAA"].dropna().astype(int).unique().tolist())
     an = c3.selectbox("Année", annees, index=len(annees)-1 if len(annees)>1 else 0)
     mois = ["Tous"] + [f"{i:02d}" for i in range(1,13)]
@@ -430,7 +441,7 @@ def vue_reservations(df: pd.DataFrame):
     if app != "Tous":
         data = data[data["appartement"] == app]
     if pf != "Toutes":
-        data = data[data["plateforme"] == pf]
+        data = data[data["plateforme"].str.lower() == pf.lower()]
     if an != "Toutes":
         data = data[data["AAAA"] == int(an)]
     if mo != "Tous":
@@ -457,6 +468,9 @@ def vue_ajouter(df: pd.DataFrame):
     st.title("➕ Ajouter une réservation")
     st.caption("Saisie rapide (libellés en ligne)")
 
+    df_pal = load_platform_palette()
+    plats_dyn = platform_options(df, df_pal)
+
     def inline(label, widget, key=None, **kwargs):
         a,b = st.columns([1,2])
         with a: st.markdown(f"**{label}**")
@@ -465,8 +479,7 @@ def vue_ajouter(df: pd.DataFrame):
     app = inline("Appartement", st.text_input, key="add_app", value="")
     nom = inline("Nom", st.text_input, key="add_nom", value="")
     tel = inline("Téléphone (+33...)", st.text_input, key="add_tel", value="")
-    pf_opts = ["Booking","Airbnb","Autre"]
-    pf = inline("Plateforme", st.selectbox, key="add_pf", options=pf_opts, index=0)
+    pf  = inline("Plateforme", st.selectbox, key="add_pf", options=plats_dyn, index=0)
 
     arrivee = inline("Arrivée", st.date_input, key="add_arr", value=date.today())
     min_dep = arrivee + timedelta(days=1)
@@ -517,6 +530,9 @@ def vue_modifier(df: pd.DataFrame):
         st.info("Aucune réservation.")
         return
 
+    df_pal = load_platform_palette()
+    plats_dyn = platform_options(df, df_pal)
+
     df["id_aff"] = df["appartement"].astype(str) + " | " + df["nom_client"].astype(str) + " | " + df["date_arrivee"].apply(format_date_str)
     choix = st.selectbox("Choisir une réservation", df["id_aff"])
 
@@ -530,9 +546,10 @@ def vue_modifier(df: pd.DataFrame):
     app = cA.text_input("Appartement", df.at[i,"appartement"])
     nom = cB.text_input("Nom", df.at[i,"nom_client"])
     tel = st.text_input("Téléphone", normalize_tel(df.at[i,"telephone"]))
-    pf_opts = ["Booking","Airbnb","Autre"]
-    idx_pf = pf_opts.index(df.at[i,"plateforme"]) if df.at[i,"plateforme"] in pf_opts else 2
-    pf = st.selectbox("Plateforme", pf_opts, index=idx_pf)
+    # plateforme dynamique
+    pf_curr = df.at[i,"plateforme"] if pd.notna(df.at[i,"plateforme"]) else "Autre"
+    init_idx = plats_dyn.index(pf_curr) if pf_curr in plats_dyn else 0
+    pf = st.selectbox("Plateforme", plats_dyn, index=init_idx)
 
     arr = st.date_input("Arrivée", df.at[i,"date_arrivee"] if isinstance(df.at[i,"date_arrivee"], date) else date.today())
     dep = st.date_input("Départ", df.at[i,"date_depart"] if isinstance(df.at[i,"date_depart"], date) else arr+timedelta(days=1), min_value=arr+timedelta(days=1))
@@ -581,7 +598,6 @@ def vue_calendrier(df: pd.DataFrame):
         st.info("Aucune donnée.")
         return
 
-    # Filtres : Appartement + Mois + Année sur une ligne
     c0, c1, c2 = st.columns(3)
     apps = ["Tous"] + sorted(df["appartement"].dropna().astype(str).unique().tolist())
     app = c0.selectbox("Appartement", apps, index=0)
@@ -618,7 +634,6 @@ def vue_calendrier(df: pd.DataFrame):
                 nom = str(r.get("nom_client",""))
                 planning[d].append(badge(pf, col) + " " + nom)
 
-    # Construire une grille HTML (pour couleurs)
     weeks = calendar.monthcalendar(annee, mois_index)
     html = "<table style='width:100%;border-collapse:collapse;font-size:13px;'>"
     head = ["Lun","Mar","Mer","Jeu","Ven","Sam","Dim"]
@@ -643,6 +658,9 @@ def vue_rapport(df: pd.DataFrame):
         st.info("Aucune donnée.")
         return
 
+    df_pal = load_platform_palette()
+    plats_dyn = platform_options(df, df_pal)
+
     c0, c1, c2, c3 = st.columns(4)
     apps = ["Tous"] + sorted(df["appartement"].dropna().astype(str).unique().tolist())
     app = c0.selectbox("Appartement", apps, index=0)
@@ -651,15 +669,14 @@ def vue_rapport(df: pd.DataFrame):
         st.info("Aucune année disponible.")
         return
     an = c1.selectbox("Année", annees, index=len(annees)-1)
-    plats = ["Toutes"] + sorted(df["plateforme"].dropna().unique().tolist())
-    pf = c2.selectbox("Plateforme", plats, index=0)
+    pf = c2.selectbox("Plateforme", ["Toutes"] + plats_dyn, index=0)
     mo = c3.selectbox("Mois", ["Tous"] + [f"{i:02d}" for i in range(1,13)], index=0)
 
     data = df[df["AAAA"] == int(an)].copy()
     if app != "Tous":
         data = data[data["appartement"] == app]
     if pf != "Toutes":
-        data = data[data["plateforme"] == pf]
+        data = data[data["plateforme"].str.lower() == pf.lower()]
     if mo != "Tous":
         data = data[data["MM"] == int(mo)]
     if data.empty:
@@ -684,7 +701,7 @@ def vue_rapport(df: pd.DataFrame):
     pct_moy = (data["charges"].sum() / data["prix_brut"].sum() * 100) if data["prix_brut"].sum() else 0
     st.markdown(totaux_html(total_brut, total_net, total_chg, total_nuits, pct_moy), unsafe_allow_html=True)
 
-    # Agrégats MM x plateforme (supprimer lignes 0)
+    # Agrégats MM x plateforme (on enlève les lignes 0)
     stats = (
         data.groupby(["MM","plateforme"], dropna=True)
             .agg(prix_brut=("prix_brut","sum"),
@@ -699,7 +716,7 @@ def vue_rapport(df: pd.DataFrame):
         st.info("Aucun agrégat non nul.")
         return
 
-    cmap_fn = build_platform_cmap(load_platform_palette())
+    cmap_fn = build_platform_cmap(df_pal)
     plats_u = sorted(stats["plateforme"].unique().tolist())
 
     def plot_grouped_bars(metric: str, title: str, ylabel: str):
@@ -763,7 +780,7 @@ def vue_clients(df: pd.DataFrame):
     if mo != "Tous":
         data = data[data["MM"] == int(mo)]
     if data.empty:
-        st.info("Aucune donnée pour ces filtres.")
+        st.info("Aucune donnée pour cette période.")
         return
 
     data["prix_brut/nuit"] = data.apply(lambda r: round((r["prix_brut"]/r["nuitees"]) if r["nuitees"] else 0,2), axis=1)
@@ -905,8 +922,9 @@ def vue_export_ics(df: pd.DataFrame):
     app = c0.selectbox("Appartement", apps, index=0)
     annees = ["Toutes"] + sorted(df["AAAA"].dropna().astype(int).unique().tolist())
     an = c1.selectbox("Année", annees, index=len(annees)-1 if len(annees)>1 else 0)
-    plats = ["Toutes"] + sorted(df["plateforme"].dropna().unique().tolist())
-    pf = c2.selectbox("Plateforme", plats, index=0)
+    df_pal = load_platform_palette()
+    plats_dyn = platform_options(df, df_pal)
+    pf = c2.selectbox("Plateforme", ["Toutes"] + plats_dyn, index=0)
     mo = c3.selectbox("Mois", ["Tous"] + [f"{i:02d}" for i in range(1,13)], index=0)
 
     data = df.copy()
@@ -915,7 +933,7 @@ def vue_export_ics(df: pd.DataFrame):
     if an != "Toutes":
         data = data[data["AAAA"] == int(an)]
     if pf != "Toutes":
-        data = data[data["plateforme"] == pf]
+        data = data[data["plateforme"].str.lower() == pf.lower()]
     if mo != "Tous":
         data = data[data["MM"] == int(mo)]
 
