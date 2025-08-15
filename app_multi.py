@@ -1,5 +1,5 @@
 # app_multi.py — Réservations Multi-Appartements (COMPLET)
-# Fonctionne avec: reservations_multi.xlsx (feuilles "Réservations" et "Plateformes")
+# Fichier Excel attendu: reservations_multi.xlsx (feuilles "Réservations" et "Plateformes")
 
 import streamlit as st
 import pandas as pd
@@ -58,6 +58,7 @@ def ensure_schema_resa(df: pd.DataFrame) -> pd.DataFrame:
     base_cols = [
         "appartement","nom_client","plateforme","telephone",
         "date_arrivee","date_depart","nuitees",
+        # Modèle multi (brut => montant avant commissions/frais CB)
         "brut","commissions","frais_cb","net","menage","taxes_sejour","base",
         "%commission","AAAA","MM","ical_uid","sms_status"
     ]
@@ -115,7 +116,7 @@ def ensure_schema_resa(df: pd.DataFrame) -> pd.DataFrame:
     # Tél
     df["telephone"] = df["telephone"].apply(normalize_tel)
 
-    # Ordre de colonnes
+    # Ordre colonnes
     cols = [c for c in base_cols if c in df.columns] + [c for c in df.columns if c not in base_cols]
     return df[cols]
 
@@ -724,7 +725,7 @@ def vue_sms(df_resa: pd.DataFrame):
                 c4.link_button("📩 SMS", f"sms:{tel}?&body={quote(body)}")
             st.code(body)
             if st.button(f"Marquer SMS envoyé ({r.get('nom_client','')})", key=f"sms_ok_{idx}"):
-                # Met le statut à 🟢
+                # Met le statut à 🟢 et journalise
                 xls = charger_fichier()
                 real = ensure_schema_resa(xls.get("Réservations", pd.DataFrame()))
                 real.loc[(real["appartement"]==r["appartement"]) &
