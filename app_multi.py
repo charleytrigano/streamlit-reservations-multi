@@ -76,7 +76,7 @@ def ensure_schema_resa(df: pd.DataFrame) -> pd.DataFrame:
         if c in df.columns:
             df[c] = pd.to_numeric(df[c], errors="coerce")
 
-    # Recalculs sûrs (respecte ton modèle)
+    # Recalculs sûrs (modèle multi)
     # net = brut - commissions - frais_cb
     if {"brut","commissions","frais_cb"}.issubset(df.columns):
         df["net"] = (df["brut"] - df["commissions"] - df["frais_cb"]).round(2)
@@ -88,7 +88,8 @@ def ensure_schema_resa(df: pd.DataFrame) -> pd.DataFrame:
     # %commission = (commissions + frais_cb) / brut * 100
     if {"commissions","frais_cb","brut"}.issubset(df.columns):
         with pd.option_context("mode.use_inf_as_na", True):
-            df["%commission"] = (((df["commissions"] + df["frais_cb"]) / df["brut"]) * 100).replace([np.inf,-np.inf], np.nan).fillna(0).round(2)
+            df["%commission"] = (((df["commissions"] + df["frais_cb"]) / df["brut"]) * 100)\
+                                    .replace([np.inf,-np.inf], np.nan).fillna(0).round(2)
 
     # Nuitées
     if {"date_arrivee","date_depart"}.issubset(df.columns):
@@ -500,13 +501,47 @@ def vue_platforms(df_plats: pd.DataFrame, df_resa: pd.DataFrame):
                 st.success("✅ Plateforme sauvegardée")
                 st.rerun()
 
+def _build_colored_calendar_html(weeks, colors_by_day, headers=("L","M","M","J","V","S","D")):
+    # Génère une table HTML responsive avec couleurs par jour
+    css = """
+    <style>
+      .cal { border-collapse: collapse; width: 100%; table-layout: fixed; }
+      .cal th, .cal td { border: 1px solid rgba(127,127,127,0.25); text-align: center; vertical-align: top; }
+      .cal th { padding: 6px 0; font-weight: 700; }
+      .cal td { height: 48px; padding: 0; }
+      .cal .cell { display:flex; align-items:flex-start; justify-content:flex-start; height:100%; padding:6px; font-weight:600; }
+      @media (max-width: 480px) {
+        .cal td { height: 40px; }
+        .cal .cell { padding: 4px; font-size: 0.95rem; }
+      }
+    </style>
+    """
+    html = [css, '<table class="cal">', "<thead><tr>"]
+    for h in headers:
+        html.append(f"<th>{h}</th>")
+    html.append("</tr></thead><tbody>")
+    for wk in weeks:
+        html.append("<tr>")
+        for d in wk:
+            if d == 0:
+                html.append("<td><div class='cell' style='background:#0000'></div></td>")
+            else:
+                color = colors_by_day.get(d, "#0000")
+                html.append(f"<td><div class='cell' style='background:{color}'>{d}</div></td>")
+        html.append("</tr>")
+    html.append("</tbody></table>")
+    return "".join(html)
+
 def vue_calendrier(df_resa: pd.DataFrame, df_plats: pd.DataFrame):
-    st.title("📅 Calendrier")
+    st.title("📅 Calendrier (mobile lisible)")
+
     df = ensure_schema_resa(df_resa)
+    plats = ensure_schema_plateformes(df_plats)
     if df.empty:
         st.info("Aucune donnée.")
         return
 
+    # Filtres en ligne
     cols = st.columns(3)
     apps = ["Tous"] + sorted(df["appartement"].dropna().unique().tolist())
     app = cols[0].selectbox("Appartement", apps)
@@ -517,35 +552,71 @@ def vue_calendrier(df_resa: pd.DataFrame, df_plats: pd.DataFrame):
         return
     annee = cols[2].selectbox("Année", years, index=len(years)-1)
 
-    mois = list(calendar.month_name).index(mois_nom)
-    nbj = calendar.monthrange(annee, mois)[1]
-    jours = [date(annee, mois, j+1) for j in range(nbj)]
-    planning = {j: [] for j in jours}
+    # Mapping plateforme -> couleur
+    color_map = {row["plateforme"]: row["couleur_hex"] for _, row in plats.iterrows()}
+    default_color = "#bbbbbb"
 
+    # Données filtrées par appartement
     data = df.copy()
     if app != "Tous":
         data = data[data["appartement"] == app]
 
-    for _, r in data.iterrows():
-        d1 = r.get("date_arrivee"); d2 = r.get("date_depart")
-        if not (isinstance(d1, date) and isinstance(d2, date)):
-            continue
-        for j in jours:
-            if d1 <= j < d2:
-                planning[j].append(f"{r.get('plateforme','')} — {r.get('nom_client','')}")
+    mois = list(calendar.month_name).index(mois_nom)
+    calendar.setfirstweekday(calendar.MONDAY)
+    weeks = calendar.monthcalendar(annee, mois)
 
-    table = []
-    for semaine in calendar.monthcalendar(annee, mois):
-        ligne = []
-        for j in semaine:
-            if j == 0:
-                ligne.append("")
+    # Couleur par jour : unique plateforme -> sa couleur ; plusieurs -> gris ; vide -> transparent
+    colors_by_day = {}
+    day_has_booking = {}  # pour le sélecteur de jour
+    for wk in weeks:
+        for d in wk:
+            if d == 0:
+                continue
+            current = date(annee, mois, d)
+            day_rows = data[(data["date_arrivee"] <= current) & (data["date_depart"] > current)]
+            if day_rows.empty:
+                colors_by_day[d] = "#0000"
+                continue
+            plats_day = day_rows["plateforme"].dropna().unique().tolist()
+            if len(plats_day) == 1:
+                colors_by_day[d] = color_map.get(plats_day[0], default_color)
             else:
-                d = date(annee, mois, j)
-                contenu = f"{j}\n" + "\n".join(planning.get(d, []))
-                ligne.append(contenu)
-        table.append(ligne)
-    st.table(pd.DataFrame(table, columns=["Lun","Mar","Mer","Jeu","Ven","Sam","Dim"]))
+                colors_by_day[d] = default_color
+            day_has_booking[d] = True
+
+    # Rendu HTML colorisé
+    st.markdown(_build_colored_calendar_html(weeks, colors_by_day), unsafe_allow_html=True)
+
+    # Légende
+    with st.expander("Légende plateformes"):
+        if plats.empty:
+            st.caption("Aucune plateforme définie.")
+        else:
+            html = "<div style='display:flex;flex-wrap:wrap;gap:8px'>"
+            for _, r in plats.iterrows():
+                html += f"<div style='display:flex;align-items:center;gap:6px;border:1px solid rgba(127,127,127,.25);padding:4px 8px;border-radius:8px'>"
+                html += f"<span style='display:inline-block;width:14px;height:14px;background:{r['couleur_hex']};border-radius:3px'></span>"
+                html += f"<span>{r['plateforme']}</span></div>"
+            html += "</div>"
+            st.markdown(html, unsafe_allow_html=True)
+
+    # Détail du jour (sélecteur)
+    jours_dispos = sorted(day_has_booking.keys())
+    if jours_dispos:
+        jour_pick = st.selectbox("Voir le détail du jour", jours_dispos, format_func=lambda x: f"{x:02d}")
+        day_date = date(annee, mois, int(jour_pick))
+        subset = data[(data["date_arrivee"] <= day_date) & (data["date_depart"] > day_date)].copy()
+        if not subset.empty:
+            subset["date_arrivee"] = subset["date_arrivee"].apply(fmt_day)
+            subset["date_depart"] = subset["date_depart"].apply(fmt_day)
+            st.dataframe(
+                subset[["appartement","plateforme","nom_client","telephone","date_arrivee","date_depart","nuitees","brut","net","base"]],
+                use_container_width=True
+            )
+        else:
+            st.info("Aucune réservation ce jour.")
+    else:
+        st.info("Aucune réservation ce mois.")
 
 def vue_rapport(df_resa: pd.DataFrame):
     st.title("📊 Rapport")
@@ -590,10 +661,10 @@ def vue_rapport(df_resa: pd.DataFrame):
     cols = [c for c in cols if c in detail.columns]
     st.dataframe(detail[cols], use_container_width=True)
 
-    # Totaux (en haut du rapport)
+    # Totaux
     chips_totaux(data)
 
-    # Agrégats mensuels par plateforme (bar charts)
+    # Agrégats mensuels par plateforme
     stats = (data.groupby(["MM","plateforme"])
                 .agg(brut=("brut","sum"),
                      net=("net","sum"),
@@ -654,16 +725,18 @@ def vue_sms(df_resa: pd.DataFrame):
             st.code(body)
             if st.button(f"Marquer SMS envoyé ({r.get('nom_client','')})", key=f"sms_ok_{idx}"):
                 # Met le statut à 🟢
-                df_resa.loc[(df_resa["appartement"]==r["appartement"]) &
-                            (df_resa["nom_client"]==r["nom_client"]) &
-                            (df_resa["date_arrivee"]==r["date_arrivee"]), "sms_status"] = "🟢"
-                sauvegarder_fichier(df_resa, charger_fichier().get("Plateformes", pd.DataFrame()))
+                xls = charger_fichier()
+                real = ensure_schema_resa(xls.get("Réservations", pd.DataFrame()))
+                real.loc[(real["appartement"]==r["appartement"]) &
+                         (real["nom_client"]==r["nom_client"]) &
+                         (real["date_arrivee"]==r["date_arrivee"]), "sms_status"] = "🟢"
+                sauvegarder_fichier(real, ensure_schema_plateformes(xls.get("Plateformes", pd.DataFrame())))
                 append_sms_log("arrivee", r.get("appartement",""), r.get("nom_client",""), tel, body)
                 st.success("Noté comme envoyé")
                 st.rerun()
             st.divider()
 
-    # Relance +24h après départ (départs d'hier)
+    # Relance +24h après départ
     st.subheader("🕒 Relance (+24h après départ)")
     dep = df[df["date_depart"] == hier].copy()
     if dep.empty:
