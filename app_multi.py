@@ -1,4 +1,4 @@
-# app_multi.py — Réservations Multi-Appartements (COMPLET)
+# app_multi.py — Réservations Multi-Appartements (COMPLET + 👥 Liste clients)
 # Fichier Excel attendu: reservations_multi.xlsx (feuilles "Réservations" et "Plateformes")
 
 import streamlit as st
@@ -58,7 +58,7 @@ def ensure_schema_resa(df: pd.DataFrame) -> pd.DataFrame:
     base_cols = [
         "appartement","nom_client","plateforme","telephone",
         "date_arrivee","date_depart","nuitees",
-        # Modèle multi (brut => montant avant commissions/frais CB)
+        # Modèle multi
         "brut","commissions","frais_cb","net","menage","taxes_sejour","base",
         "%commission","AAAA","MM","ical_uid","sms_status"
     ]
@@ -304,7 +304,7 @@ def append_sms_log(nature: str, apartment: str, client: str, tel: str, body: str
         df = pd.DataFrame([row])
     df.to_csv(SMS_LOG, index=False)
 
-# ============================== Vues ==============================
+# ============================== Vues principales ==============================
 
 def vue_reservations(df_resa: pd.DataFrame, df_plats: pd.DataFrame):
     st.title("📋 Réservations (Multi)")
@@ -566,9 +566,9 @@ def vue_calendrier(df_resa: pd.DataFrame, df_plats: pd.DataFrame):
     calendar.setfirstweekday(calendar.MONDAY)
     weeks = calendar.monthcalendar(annee, mois)
 
-    # Couleur par jour : unique plateforme -> sa couleur ; plusieurs -> gris ; vide -> transparent
+    # Couleur par jour
     colors_by_day = {}
-    day_has_booking = {}  # pour le sélecteur de jour
+    day_has_booking = {}
     for wk in weeks:
         for d in wk:
             if d == 0:
@@ -601,7 +601,7 @@ def vue_calendrier(df_resa: pd.DataFrame, df_plats: pd.DataFrame):
             html += "</div>"
             st.markdown(html, unsafe_allow_html=True)
 
-    # Détail du jour (sélecteur)
+    # Détail du jour
     jours_dispos = sorted(day_has_booking.keys())
     if jours_dispos:
         jour_pick = st.selectbox("Voir le détail du jour", jours_dispos, format_func=lambda x: f"{x:02d}")
@@ -806,6 +806,63 @@ def vue_export_ics(df_resa: pd.DataFrame):
     )
     st.caption("Google Agenda → Paramètres → Importer & exporter → Importer → sélectionnez le .ics.")
 
+# ============================== 👥 Liste clients ==============================
+
+def vue_clients(df_resa: pd.DataFrame):
+    st.title("👥 Liste des clients")
+    df = ensure_schema_resa(df_resa)
+    if df.empty:
+        st.info("Aucune donnée.")
+        return
+
+    c1, c2, c3, c4 = st.columns(4)
+    apps = ["Tous"] + sorted(df["appartement"].dropna().unique().tolist())
+    app = c1.selectbox("Appartement", apps)
+    pfs  = ["Toutes"] + sorted(df["plateforme"].dropna().unique().tolist())
+    pf   = c2.selectbox("Plateforme", pfs)
+    years = sorted([int(x) for x in df["AAAA"].dropna().unique()])
+    annee = c3.selectbox("Année", ["Toutes"] + years, index=len(years)) if years else "Toutes"
+    mois  = c4.selectbox("Mois", ["Tous"] + [f"{i:02d}" for i in range(1,13)])
+
+    data = df.copy()
+    if app != "Tous":
+        data = data[data["appartement"] == app]
+    if pf != "Toutes":
+        data = data[data["plateforme"] == pf]
+    if annee != "Toutes":
+        data = data[data["AAAA"] == int(annee)]
+    if mois != "Tous":
+        data = data[data["MM"] == int(mois)]
+
+    if data.empty:
+        st.info("Aucun client pour ces filtres.")
+        return
+
+    # €/nuit
+    data["brut/nuit"] = data.apply(lambda r: round((r["brut"]/r["nuitees"]) if r["nuitees"] else 0,2), axis=1)
+    data["net/nuit"]  = data.apply(lambda r: round((r["net"]/r["nuitees"])  if r["nuitees"] else 0,2), axis=1)
+    data["base/nuit"] = data.apply(lambda r: round((r["base"]/r["nuitees"]) if r["nuitees"] else 0,2), axis=1)
+
+    show = data.copy()
+    for c in ["date_arrivee","date_depart"]:
+        show[c] = show[c].apply(fmt_day)
+
+    cols = [
+        "appartement","nom_client","plateforme","telephone",
+        "date_arrivee","date_depart","nuitees",
+        "brut","net","base","%commission",
+        "brut/nuit","net/nuit","base/nuit","sms_status"
+    ]
+    cols = [c for c in cols if c in show.columns]
+    st.dataframe(show[cols], use_container_width=True)
+
+    st.download_button(
+        "📥 Télécharger (CSV)",
+        data=show[cols].to_csv(index=False).encode("utf-8"),
+        file_name="clients_multi.csv",
+        mime="text/csv"
+    )
+
 # ============================== Maintenance (cache) ==============================
 
 def render_cache_tools():
@@ -837,7 +894,7 @@ def main():
     onglet = st.sidebar.radio(
         "Aller à",
         ["📋 Réservations","➕ Ajouter","✏️ Modifier/Supprimer",
-         "🎨 Plateformes","📅 Calendrier","📊 Rapport","✉️ SMS","📤 Export ICS"]
+         "🎨 Plateformes","📅 Calendrier","📊 Rapport","👥 Liste clients","✉️ SMS","📤 Export ICS"]
     )
 
     render_cache_tools()
@@ -854,6 +911,8 @@ def main():
         vue_calendrier(df_resa, df_plat)
     elif onglet == "📊 Rapport":
         vue_rapport(df_resa)
+    elif onglet == "👥 Liste clients":
+        vue_clients(df_resa)
     elif onglet == "✉️ SMS":
         vue_sms(df_resa)
     elif onglet == "📤 Export ICS":
