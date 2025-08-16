@@ -318,7 +318,7 @@ def sms_message_arrivee(row: pd.Series) -> str:
         "a quelle heure vous pensez arriver.\n\n "
         "Sachez egalement qu'une place de parking est a votre disposition.\n\n "
         "Excellent voyage et à très bientôt.\n\n "
-        "Annick & Charley"
+        ""
     )
 
 def sms_message_depart(row: pd.Series) -> str:
@@ -329,7 +329,7 @@ def sms_message_depart(row: pd.Series) -> str:
         "Nous espérons que vous avez passé un moment aussi agréable que celui que nous avons eu à vous accueillir.\n\n"
         "Si l’envie vous prend de revenir, notre porte vous sera toujours grande ouverte.\n\n"
         "Au plaisir de vous accueillir à nouveau,\n"
-        "Annick & Charley"
+        ""
     )
 
 # =============== UI helpers ==========================
