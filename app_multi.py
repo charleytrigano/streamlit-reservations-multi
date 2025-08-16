@@ -268,6 +268,7 @@ def df_to_ics(df: pd.DataFrame, cal_name: str = "Réservations") -> str:
         nom_client = str(row.get("nom_client") or "").strip()
         tel = str(row.get("telephone") or "").strip()
         appart = str(row.get("appartement") or "").strip()
+        # -> Résumé inclut l'appartement
         summary = " - ".join([x for x in [appart, plateforme, nom_client, tel] if x])
         brut = float(row.get("prix_brut") or 0)
         net  = float(row.get("prix_net")  or 0)
@@ -295,7 +296,7 @@ def df_to_ics(df: pd.DataFrame, cal_name: str = "Réservations") -> str:
     A("END:VCALENDAR")
     return "\r\n".join(lines) + "\r\n"
 
-# =============== Templates SMS =======================
+# =============== Templates SMS (signatures retirées) =
 
 def sms_message_arrivee(row: pd.Series) -> str:
     d1 = row.get("date_arrivee"); d2 = row.get("date_depart")
@@ -307,29 +308,28 @@ def sms_message_arrivee(row: pd.Series) -> str:
     tel_aff = str(row.get("telephone") or "").strip()
     appart = str(row.get("appartement") or "").strip()
 
+    # En-tête = appartement, signature retirée
     return (
         f"{appart}\n"
         f"Plateforme : {plateforme}\n"
         f"Date d'arrivee : {d1s}  Date depart : {d2s}  Nombre de nuitees : {nuitees}\n\n"
         f"Bonjour {nom}\n"
         f"Telephone : {tel_aff}\n\n"
-        "Bienvenue chez nous !\n\n "
-        "Nous sommes ravis de vous accueillir bientot. Pour organiser au mieux votre reception, pourriez-vous nous indiquer "
-        "a quelle heure vous pensez arriver.\n\n "
-        "Sachez egalement qu'une place de parking est a votre disposition.\n\n "
-        "Excellent voyage et à très bientôt.\n\n "
-        "Annick & Charley"
+        "Bienvenue chez nous !\n\n"
+        "Nous sommes ravis de vous accueillir bientot. Pour organiser au mieux votre reception, "
+        "pourriez-vous nous indiquer a quelle heure vous pensez arriver.\n\n"
+        "Sachez egalement qu'une place de parking est a votre disposition.\n\n"
+        "Excellent voyage et a tres bientot."
     )
 
 def sms_message_depart(row: pd.Series) -> str:
     nom = str(row.get("nom_client") or "")
+    # Signature retirée également
     return (
         f"Bonjour {nom},\n\n"
         "Un grand merci d’avoir choisi notre appartement pour votre séjour ! "
-        "Nous espérons que vous avez passé un moment aussi agréable que celui que nous avons eu à vous accueillir.\n\n"
-        "Si l’envie vous prend de revenir, notre porte vous sera toujours grande ouverte.\n\n"
-        "Au plaisir de vous accueillir à nouveau,\n"
-        "Annick & Charley"
+        "Nous espérons que vous avez passé un moment agréable.\n\n"
+        "Au plaisir de vous accueillir à nouveau."
     )
 
 # =============== UI helpers ==========================
@@ -338,38 +338,38 @@ def kpi_chips(df: pd.DataFrame):
     core, _ = split_totals(df)
     if core.empty:
         return
-    b    = core["prix_brut"].sum()
-    # Total charges = commissions + frais_cb (somme)
+    total_brut = core["prix_brut"].sum()
     total_comm = core["commissions"].sum()
     total_cb   = core["frais_cb"].sum()
-    ch   = total_comm + total_cb
-    n    = core["prix_net"].sum()
-    base = core["base"].sum()
-    nuits= core["nuitees"].sum()
-    pct  = (ch / b * 100) if b else 0
-    pm_nuit = (b / nuits) if nuits else 0
+    total_ch   = total_comm + total_cb          # ← Charges = commissions + frais CB
+    total_net  = core["prix_net"].sum()
+    total_base = core["base"].sum()
+    total_nuit = core["nuitees"].sum()
+    pct_moy    = (total_ch / total_brut * 100) if total_brut else 0
+    pm_nuit    = (total_brut / total_nuit) if total_nuit else 0
 
     html = f"""
     <style>
     .chips-wrap {{ display:flex; flex-wrap:wrap; gap:8px; margin:6px 0 10px 0; }}
-    .chip {{ padding:8px 10px; border-radius:10px; background: rgba(127,127,127,0.12); border: 1px solid rgba(127,127,127,0.25); font-size:0.9rem; }}
+    .chip {{ padding:8px 10px; border-radius:10px; background: rgba(127,127,127,0.12);
+             border: 1px solid rgba(127,127,127,0.25); font-size:0.9rem; }}
     .chip b {{ display:block; margin-bottom:3px; font-size:0.85rem; opacity:0.8; }}
     .chip .v {{ font-weight:600; }}
     </style>
     <div class="chips-wrap">
-      <div class="chip"><b>Total Brut</b><div class="v">{b:,.2f} €</div></div>
-      <div class="chip"><b>Total Net</b><div class="v">{n:,.2f} €</div></div>
-      <div class="chip"><b>Total Base</b><div class="v">{base:,.2f} €</div></div>
-      <div class="chip"><b>Total Charges</b><div class="v">{ch:,.2f} €</div></div>
-      <div class="chip"><b>Nuitées</b><div class="v">{int(nuits) if pd.notna(nuits) else 0}</div></div>
-      <div class="chip"><b>Commission moy.</b><div class="v">{pct:.2f} %</div></div>
+      <div class="chip"><b>Total Brut</b><div class="v">{total_brut:,.2f} €</div></div>
+      <div class="chip"><b>Total Net</b><div class="v">{total_net:,.2f} €</div></div>
+      <div class="chip"><b>Total Base</b><div class="v">{total_base:,.2f} €</div></div>
+      <div class="chip"><b>Total Charges</b><div class="v">{total_ch:,.2f} €</div></div>
+      <div class="chip"><b>Nuitées</b><div class="v">{int(total_nuit) if pd.notna(total_nuit) else 0}</div></div>
+      <div class="chip"><b>Commission moy.</b><div class="v">{pct_moy:.2f} %</div></div>
       <div class="chip"><b>Prix moyen/nuit</b><div class="v">{pm_nuit:,.2f} €</div></div>
     </div>
     """
     st.markdown(html, unsafe_allow_html=True)
 
 def search_box(df: pd.DataFrame) -> pd.DataFrame:
-    q = st.text_input("🔎 Recherche (nom, plateforme, téléphone…)", "")
+    q = st.text_input("🔎 Recherche (appartement, nom, plateforme, téléphone…)", "")
     if not q:
         return df
     ql = q.strip().lower()
@@ -377,10 +377,10 @@ def search_box(df: pd.DataFrame) -> pd.DataFrame:
         s = "" if pd.isna(v) else str(v)
         return ql in s.lower()
     mask = (
+        df["appartement"].apply(_match) |
         df["nom_client"].apply(_match) |
         df["plateforme"].apply(_match) |
-        df["telephone"].apply(_match) |
-        df["appartement"].apply(_match)
+        df["telephone"].apply(_match)
     )
     return df[mask].copy()
 
@@ -400,7 +400,7 @@ def vue_reservations(df: pd.DataFrame):
         enable_search = st.checkbox("Activer la recherche", value=True)
 
     df = ensure_schema(df)
-    df, appart_sel = filtre_appartement(df, key="res_app")
+    df, _ = filtre_appartement(df, key="res_app")
 
     if show_kpi:
         kpi_chips(df)
@@ -496,13 +496,9 @@ def vue_ajouter(df: pd.DataFrame):
 def vue_modifier(df: pd.DataFrame):
     st.title("✏️ Modifier / Supprimer")
     df = ensure_schema(df)
+    df, _ = filtre_appartement(df, key="mod_app")
     if df.empty:
         st.info("Aucune réservation.")
-        return
-
-    df, appart_sel = filtre_appartement(df, key="mod_app")
-    if df.empty:
-        st.info("Aucune réservation pour cet appartement.")
         return
 
     df["identifiant"] = df["appartement"].astype(str) + " | " + df["nom_client"].astype(str) + " | " + df["date_arrivee"].apply(format_date_str)
@@ -579,7 +575,7 @@ def vue_modifier(df: pd.DataFrame):
 def vue_calendrier(df: pd.DataFrame):
     st.title("📅 Calendrier mensuel")
     df = ensure_schema(df)
-    df, appart_sel = filtre_appartement(df, key="cal_app")
+    df, _ = filtre_appartement(df, key="cal_app")
     if df.empty:
         st.info("Aucune donnée.")
         return
@@ -626,7 +622,7 @@ def vue_calendrier(df: pd.DataFrame):
 def vue_rapport(df: pd.DataFrame):
     st.title("📊 Rapport (détaillé)")
     df = ensure_schema(df)
-    df, appart_sel = filtre_appartement(df, key="rep_app")
+    df, _ = filtre_appartement(df, key="rep_app")
     if df.empty:
         st.info("Aucune donnée.")
         return
@@ -668,9 +664,11 @@ def vue_rapport(df: pd.DataFrame):
     cols_detail = [c for c in cols_detail if c in detail.columns]
     st.dataframe(detail[cols_detail], use_container_width=True)
 
+    # KPI sur le sous-ensemble filtré
     core, _ = split_totals(data)
     kpi_chips(core)
 
+    # Agrégations par MM x plateforme
     stats = (
         data.groupby(["MM","plateforme"], dropna=True)
             .agg(prix_brut=("prix_brut","sum"),
@@ -707,7 +705,7 @@ def vue_rapport(df: pd.DataFrame):
 def vue_clients(df: pd.DataFrame):
     st.title("👥 Liste des clients")
     df = ensure_schema(df)
-    df, appart_sel = filtre_appartement(df, key="cli_app")
+    df, _ = filtre_appartement(df, key="cli_app")
     if df.empty:
         st.info("Aucune donnée.")
         return
@@ -732,7 +730,8 @@ def vue_clients(df: pd.DataFrame):
         show[c] = show[c].apply(format_date_str)
 
     cols = ["appartement","nom_client","plateforme","telephone","date_arrivee","date_depart",
-            "nuitees","prix_brut","commissions","frais_cb","prix_net","menage","taxes_sejour","base","charges","%","prix_brut/nuit","prix_net/nuit"]
+            "nuitees","prix_brut","commissions","frais_cb","prix_net","menage","taxes_sejour",
+            "base","charges","%","prix_brut/nuit","prix_net/nuit"]
     cols = [c for c in cols if c in show.columns]
     st.dataframe(show[cols], use_container_width=True)
     st.download_button(
@@ -767,7 +766,7 @@ def vue_export_ics(df: pd.DataFrame):
         return
 
     cal_name = f"Réservations {appart_sel}" if appart_sel else "Réservations"
-    ics_text = df_to_ics(data)
+    ics_text = df_to_ics(data, cal_name=cal_name)
     st.download_button(
         "⬇️ Télécharger reservations.ics",
         data=ics_text.encode("utf-8"),
@@ -779,7 +778,7 @@ def vue_export_ics(df: pd.DataFrame):
 def vue_sms(df: pd.DataFrame):
     st.title("✉️ SMS (envoi manuel)")
     df = ensure_schema(df)
-    df, appart_sel = filtre_appartement(df, key="sms_app")
+    df, _ = filtre_appartement(df, key="sms_app")
     if df.empty:
         st.info("Aucune donnée.")
         return
@@ -831,7 +830,12 @@ def vue_sms(df: pd.DataFrame):
 
     st.subheader("✍️ Composer un SMS manuel")
     df_pick = df.copy()
-    df_pick["id_aff"] = df_pick["appartement"].astype(str) + " | " + df_pick["nom_client"].astype(str) + " | " + df_pick["plateforme"].astype(str) + " | " + df_pick["date_arrivee"].apply(format_date_str)
+    df_pick["id_aff"] = (
+        df_pick["appartement"].astype(str) + " | " +
+        df_pick["nom_client"].astype(str) + " | " +
+        df_pick["plateforme"].astype(str) + " | " +
+        df_pick["date_arrivee"].apply(format_date_str)
+    )
     choix = st.selectbox("Choisir une réservation", df_pick["id_aff"])
     r = df_pick.loc[df_pick["id_aff"] == choix].iloc[0]
     tel = normalize_tel(r.get("telephone"))
